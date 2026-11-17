@@ -171,7 +171,20 @@ class AlocadorContiguo(Alocador):
 
 
 # ====================================================================== M6
-class AlocadorEncadeado(Alocador):
+class _AlocadorDeLivres(Alocador):
+    """Base das alocações não contíguas: usa os primeiros blocos livres do disco, em qualquer
+    posição (Bitmap.primeiros_livres)."""
+
+    def _reservar(self, n):
+        blocos = self.bitmap.primeiros_livres(n)
+        if blocos is None:
+            self.falhas += 1
+            raise ErroSA("ENOSPC", "faltam %d blocos livres" % n)
+        self.bitmap.ocupar(blocos)
+        return blocos
+
+
+class AlocadorEncadeado(_AlocadorDeLivres):
     """
     Alocação encadeada "pura": cada bloco de dados guarda o ponteiro para o próximo.
     - alocar/estender usam os primeiros blocos livres do disco (Bitmap.primeiros_livres);
@@ -185,16 +198,33 @@ class AlocadorEncadeado(Alocador):
     nome = "encadeada"
 
     def alocar(self, fcb, n):
-        raise NotImplementedError("TODO (M6): alocação encadeada")
+        fcb.blocos = self._reservar(n) if n > 0 else []
+        fcb.extra["cursor"] = -1
+        return []
 
     def estender(self, fcb, n):
-        raise NotImplementedError("TODO (M6): alocação encadeada")
+        if n <= 0:
+            return []
+        if not fcb.blocos:
+            return self.alocar(fcb, n)
+        novos = self._reservar(n)
+        extras = [("E", fcb.blocos[-1])]          # o antigo último passa a apontar para o novo
+        fcb.blocos.extend(novos)
+        return extras
+
+    def liberar(self, fcb):
+        super().liberar(fcb)
+        fcb.extra["cursor"] = -1
 
     def bloco_fisico(self, fcb, i):
-        raise NotImplementedError("TODO (M6): alocação encadeada")
+        cursor = fcb.extra.get("cursor", -1)
+        primeiro = cursor + 1 if i > cursor else 0
+        extras = [("L", fcb.blocos[j]) for j in range(primeiro, i)]
+        fcb.extra["cursor"] = i
+        return fcb.blocos[i], extras
 
 
-class AlocadorFAT(Alocador):
+class AlocadorFAT(_AlocadorDeLivres):
     """
     Alocação encadeada com tabela de alocação (FAT), como nos pendrives (FAT32/exFAT).
     Mesmos blocos que a encadeada, mas os ponteiros ficam numa tabela mantida em MEMÓRIA:
@@ -203,16 +233,29 @@ class AlocadorFAT(Alocador):
     nome = "fat"
 
     def alocar(self, fcb, n):
-        raise NotImplementedError("TODO (M6): FAT")
+        fcb.blocos = self._reservar(n) if n > 0 else []
+        return []
 
     def estender(self, fcb, n):
-        raise NotImplementedError("TODO (M6): FAT")
+        if n > 0:
+            fcb.blocos.extend(self._reservar(n))
+        return []
 
     def bloco_fisico(self, fcb, i):
-        raise NotImplementedError("TODO (M6): FAT")
+        return fcb.blocos[i], []
 
 
-class AlocadorIndexado(Alocador):
+PONTEIROS_POR_INDICE = 1024
+
+
+def _blocos_de_indice(n):
+    """Quantos blocos de índice um arquivo de n blocos de dados precisa."""
+    if n <= PONTEIROS_POR_INDICE:
+        return 1
+    return 1 + -(-n // PONTEIROS_POR_INDICE)
+
+
+class AlocadorIndexado(_AlocadorDeLivres):
     """
     Alocação indexada (como os i-nodes do Unix), com blocos de índice de 1024 ponteiros:
     - até 1024 blocos de dados: 1 bloco de índice;
@@ -230,16 +273,41 @@ class AlocadorIndexado(Alocador):
     nome = "indexada"
 
     def alocar(self, fcb, n):
-        raise NotImplementedError("TODO (M6): alocação indexada")
+        k = _blocos_de_indice(n)
+        livres = self._reservar(k + n)
+        fcb.extra["indices"] = livres[:k]
+        fcb.blocos = livres[k:]
+        return [("E", b) for b in fcb.extra["indices"]]
 
     def estender(self, fcb, n):
-        raise NotImplementedError("TODO (M6): alocação indexada")
+        if n <= 0:
+            return []
+        indices = fcb.extra.get("indices")
+        if not indices:
+            return self.alocar(fcb, n)
+        k_antes = len(indices)
+        k_depois = _blocos_de_indice(len(fcb.blocos) + n)
+        extra_idx = k_depois - k_antes
+        livres = self._reservar(extra_idx + n)
+        novos_idx, novos_dados = livres[:extra_idx], livres[extra_idx:]
+        if k_antes == 1 and k_depois > 1:
+            # O índice único vira um 2º nível; o primeiro bloco novo é o de 1º nível.
+            indices[:] = [novos_idx[0], indices[0]] + novos_idx[1:]
+        else:
+            indices.extend(novos_idx)
+        fcb.blocos.extend(novos_dados)
+        return [("E", b) for b in indices]
 
     def liberar(self, fcb):
-        raise NotImplementedError("TODO (M6): alocação indexada")
+        self.bitmap.liberar(fcb.blocos + fcb.extra.get("indices", []))
+        fcb.blocos = []
+        fcb.extra["indices"] = []
 
     def bloco_fisico(self, fcb, i):
-        raise NotImplementedError("TODO (M6): alocação indexada")
+        indices = fcb.extra["indices"]
+        if len(indices) == 1:
+            return fcb.blocos[i], [("L", indices[0])]
+        return fcb.blocos[i], [("L", indices[0]), ("L", indices[1 + i // PONTEIROS_POR_INDICE])]
 
 
 ALOCADORES = {c.nome: c for c in (AlocadorContiguo, AlocadorEncadeado, AlocadorFAT, AlocadorIndexado)}

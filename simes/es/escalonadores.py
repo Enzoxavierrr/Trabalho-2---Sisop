@@ -93,7 +93,13 @@ class CSCAN(Escalonador):
     nome = "C-SCAN"
 
     def escolher(self, fila, cabeca, direcao, agora, max_cilindro):
-        raise NotImplementedError("TODO (M2): implementar o C-SCAN")
+        a_frente = [i for i in range(len(fila)) if fila[i].cilindro >= cabeca]
+        if a_frente:
+            melhor = min(a_frente, key=lambda i: (fila[i].cilindro - cabeca, i))
+            return melhor, +1, []
+        # Nada acima: sobe até a borda, volta ao cilindro 0 e atende a de menor cilindro.
+        melhor = min(range(len(fila)), key=lambda i: (fila[i].cilindro, i))
+        return melhor, +1, [max_cilindro, 0]
 
 
 class LOOK(Escalonador):
@@ -101,7 +107,13 @@ class LOOK(Escalonador):
     nome = "LOOK"
 
     def escolher(self, fila, cabeca, direcao, agora, max_cilindro):
-        raise NotImplementedError("TODO (M2): implementar o LOOK")
+        a_frente = [i for i in range(len(fila)) if (fila[i].cilindro - cabeca) * direcao >= 0]
+        if a_frente:
+            melhor = min(a_frente, key=lambda i: (abs(fila[i].cilindro - cabeca), i))
+            return melhor, direcao, []
+        # Nada à frente: inverte sem ir à borda; agora todas estão à frente.
+        melhor = min(range(len(fila)), key=lambda i: (abs(fila[i].cilindro - cabeca), i))
+        return melhor, -direcao, []
 
 
 class CLOOK(Escalonador):
@@ -112,7 +124,13 @@ class CLOOK(Escalonador):
     nome = "C-LOOK"
 
     def escolher(self, fila, cabeca, direcao, agora, max_cilindro):
-        raise NotImplementedError("TODO (M2): implementar o C-LOOK")
+        a_frente = [i for i in range(len(fila)) if fila[i].cilindro >= cabeca]
+        if a_frente:
+            melhor = min(a_frente, key=lambda i: (fila[i].cilindro - cabeca, i))
+            return melhor, +1, []
+        # Nada acima: salta direto para a requisição de menor cilindro (o salto conta).
+        melhor = min(range(len(fila)), key=lambda i: (fila[i].cilindro, i))
+        return melhor, +1, []
 
 
 class Deadline(Escalonador):
@@ -127,7 +145,11 @@ class Deadline(Escalonador):
     nome = "DEADLINE"
 
     def escolher(self, fila, cabeca, direcao, agora, max_cilindro):
-        raise NotImplementedError("TODO (M2): implementar o DEADLINE")
+        vencidas = [i for i in range(len(fila)) if agora >= fila[i].prazo]
+        if vencidas:
+            melhor = min(vencidas, key=lambda i: (fila[i].prazo, i))
+            return melhor, direcao, []
+        return SSTF().escolher(fila, cabeca, direcao, agora, max_cilindro)
 
 
 ESCALONADORES = {c.nome: c for c in (FCFS, SSTF, SCAN, CSCAN, LOOK, CLOOK, Deadline)}
