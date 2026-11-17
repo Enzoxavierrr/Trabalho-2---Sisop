@@ -76,3 +76,235 @@ Resultado dos testes automáticos (`python3 executar.py testes`): Ran 26 tests .
 
 **Decisões:** converte o histórico `(instante, processo, tipo, bloco, n_blocos)` em requisições ordenadas por instante (ordenação estável, então acessos da mesma operação ficam na ordem em que foram feitos) com ids 0, 1, 2...
 
+## 3. Experimentos
+
+> Os experimentos oficiais são os gerados por `experimentos.py`; os números abaixo vêm de `resultados/`. Tempos em ms, deslocamento em cilindros.
+
+### X1 — Escalonadores sob quatro padrões de carga
+
+**Hipótese:** o SSTF terá a menor resposta média e o menor deslocamento na maioria das cargas, mas a maior espera máxima (risco de inanição). O SCAN ficará entre o FCFS e o SSTF em resposta média, com espera máxima menor que a do SSTF. Em carga sequencial com dois fluxos distantes, o FCFS será o pior por alternar entre as regiões.
+
+**Fundamentação:** Silberschatz 9ª ed., seção 10.4: o SSTF reduz o tempo de busca mas pode causar inanição; o SCAN limita a espera por varrer o disco em um sentido e inverter; o FCFS é justo, porém ignora a posição do braço.
+
+**Configuração:** FCFS, SSTF e SCAN em HDD com interrupção, sobre as cargas `es_sequencial`, `es_aleatoria`, `es_concentrada` e `es_rajadas` (2.000 requisições cada). Mede deslocamento do braço, resposta média e p95, espera máxima e vazão.
+
+**Resultados:**
+
+| Carga | Esc. | Deslocamento | Resp. média | Resp. p95 | Espera máx. |
+|---|---|---|---|---|---|
+| sequencial | FCFS | 7.184.093 | 10.241,0 | 19.565,4 | 20.598,1 |
+| sequencial | SSTF | 2.336.365 | 17,4 | 32,8 | 37,4 |
+| sequencial | SCAN | 2.469.069 | 23,2 | 43,6 | 48,6 |
+| aleatória | FCFS | 3.316.472 | 50,1 | 145,1 | 193,5 |
+| aleatória | SSTF | 2.631.714 | 21,0 | 48,6 | 116,7 |
+| aleatória | SCAN | 3.372.680 | 31,5 | 65,1 | 116,7 |
+| concentrada | FCFS | 1.864.164 | 19,8 | 48,6 | 96,0 |
+| concentrada | SSTF | 1.613.030 | 15,0 | 37,2 | 130,5 |
+| concentrada | SCAN | 3.338.708 | 33,2 | 68,3 | 118,8 |
+| rajadas | FCFS | 3.341.490 | 267,0 | 505,3 | 597,3 |
+| rajadas | SSTF | 209.811 | 147,5 | 277,7 | 297,0 |
+| rajadas | SCAN | 199.955 | 148,6 | 278,7 | 285,4 |
+
+**Evidências:** `resultados/es.csv` (experimento=X1); `graficos/X1_resposta_media_ms.png`, `graficos/X1_deslocamento_total.png`, `graficos/X1_espera_max_ms.png`.
+
+**Análise:** o SSTF teve a menor resposta média em todas as cargas, e o FCFS foi catastrófico na sequencial: as duas fontes (blocos 20.000 e 250.000) ficam a cerca de 3.600 cilindros uma da outra, então cada requisição atendida em ordem de chegada paga uma busca longa (cerca de 12 ms) mais a rotação, mais do que o intervalo entre chegadas, e a fila cresce até 10 s de espera. O SSTF e o SCAN ficam num fluxo por vez e mantêm a transferência em sequência, sem pagar a rotação. Na carga concentrada (80% dos acessos nos primeiros 20% do disco) o SCAN foi pior que o FCFS: 3,3 milhões de cilindros contra 1,9 milhão, pois cada varredura vai até a borda (cilindro 4.999) mesmo sem requisições lá. Na carga em rajadas, SSTF e SCAN praticamente empatam, porque a fila longa dá sempre uma requisição próxima. A espera máxima do SSTF só foi a maior na concentrada (130,5 contra 96,0 do FCFS); nas demais, não houve inanição visível, pois as cargas são curtas e as chegadas continuam a cada poucos ms. O deslocamento total sozinho prediz mal a resposta: na aleatória o SCAN percorreu um pouco mais que o FCFS (3,37 contra 3,32 milhões) e ainda assim respondeu mais rápido (31,5 contra 50,1 ms); nossa explicação, não testada, é que o ganho vem de atender várias requisições por varredura quando a fila está longa.
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
+### X2 — Polling × interrupção conforme o dispositivo
+
+**Hipótese:** num HDD, o polling consumirá quase toda a CPU (espera ocupada durante milissegundos de busca e rotação) e a interrupção, pouco. Num dispositivo rápido, a relação se inverte: o polling custará menos que a interrupção, porque o tempo de espera passa a ser menor que o custo de tratar a interrupção.
+
+**Fundamentação:** Silberschatz 9ª ed., seções 13.2.1 e 13.2.2: o polling é eficiente quando o dispositivo responde rápido e a espera ocupada é curta; a interrupção evita gastar CPU esperando um dispositivo lento, mas tem o custo fixo de tratar cada interrupção.
+
+**Configuração:** FCFS sobre `es_aleatoria` e `es_sequencial`, em HDD e em dispositivo rápido (sem busca e sem rotação, 0,008 ms por bloco), nos dois modos. Mede a porcentagem de CPU gasta com E/S.
+
+**Resultados:**
+
+| Carga | Dispositivo | CPU polling | CPU interrupção |
+|---|---|---|---|
+| aleatória | HDD | 86,28% | 1,12% |
+| sequencial | HDD | 100,00% | 0,84% |
+| aleatória | rápido | 0,53% | 1,12% |
+| sequencial | rápido | 1,07% | 2,28% |
+
+**Evidências:** `resultados/es.csv` (experimento=X2); `graficos/X2_cpu.png`.
+
+**Análise:** no HDD o polling ocupa a CPU durante todo o atendimento, então a porcentagem acompanha a utilização do disco: 86% na aleatória e 100% na sequencial (disco saturado, ver X1). A interrupção custa cerca de 1% porque paga só 0,017 ms por bloco. No dispositivo rápido, o atendimento de 8 blocos dura cerca de 0,064 ms, enquanto a interrupção custa 8 × 0,017 = 0,136 ms: o polling gasta cerca de metade da CPU da interrupção (0,53% contra 1,12%). O ponto de equilíbrio do modelo é o atendimento durar o mesmo que o custo por bloco da interrupção (0,017 ms por bloco). A resposta média foi idêntica entre os modos, pois o custo de CPU não entra no tempo de atendimento do disco no simulador.
+
+**Veredito:** CONFIRMADA
+
+### X3 — Acesso sequencial × direto
+
+**Hipótese:** o compilador (leitura sequencial) e o banco de dados (acesso direto) farão quantidades parecidas de acessos por operação de leitura e escrita (1 bloco), mas o tempo por operação do banco de dados será várias vezes maior, porque cada acesso direto paga busca e latência rotacional enquanto a leitura sequencial só paga a transferência.
+
+**Fundamentação:** Silberschatz 9ª ed., seções 11.2 (métodos de acesso) e 12.4: no acesso sequencial o próximo bloco está logo depois do anterior; no direto, a posição é arbitrária. O modelo de custo do disco (`parametros.py`) zera a rotação quando o bloco é o seguinte ao último transferido.
+
+**Configuração:** cargas `fs_compilador` (leitura sequencial de fontes, 3 compilações) e `fs_banco_dados` (tabela de 64 MiB com leituras e gravações em posições aleatórias, mais um log), com alocação contígua. Mede acessos e tempo por operação.
+
+**Resultados:**
+
+| Operação | Compilador: acessos / tempo (ms) | Banco de dados: acessos / tempo (ms) |
+|---|---|---|
+| read | 1,0 / 1,48 | 1,0 / 5,49 |
+| write | 1,0 / 0,91 | 1,0 / 5,54 |
+| open | 3,0 / 8,20 | 2,0 / 4,25 |
+
+**Evidências:** `resultados/arquivos_por_operacao.csv` (experimento=X3); `resultados/arquivos.csv` (experimento=X3); `graficos/X3_tempo_por_operacao.png`.
+
+**Análise:** os acessos por leitura e escrita são iguais (1 bloco), mas o tempo de leitura do banco é 3,7 vezes o do compilador (5,49 contra 1,48 ms) e o da escrita, 6 vezes (5,54 contra 0,91 ms), pela busca e pela rotação a cada acesso aleatório. No compilador, os blocos consecutivos de um arquivo evitam a rotação e deixam o `read` próximo do custo de transferência. O `open` do compilador custa mais (3 acessos contra 2) porque os arquivos estão em `/src/...`, mais fundo na árvore que o arquivo do banco de dados.
+
+**Veredito:** CONFIRMADA
+
+### X4 — Custo de resolver caminhos conforme a profundidade
+
+**Hipótese:** o número de acessos do `open` crescerá linearmente com a profundidade do caminho (um por diretório mais o da raiz), e o tempo do `open` crescerá proporcionalmente. A leitura depois do `open` não dependerá da profundidade.
+
+**Fundamentação:** Silberschatz 9ª ed., seção 11.3 (estrutura de diretórios) e 11.5.1 (operações): resolver um caminho exige localizar cada componente no diretório que o contém.
+
+**Configuração:** um arquivo no fim de uma cadeia de 1 a 10 diretórios, aberto 20 vezes, em cada profundidade. Mede acessos e tempo por `open`.
+
+**Resultados:**
+
+| Profundidade | Acessos por open | Tempo por open (ms) | Acessos por read |
+|---|---|---|---|
+| 1 | 2 | 4,25 | 1 |
+| 2 | 3 | 4,29 | 1 |
+| 5 | 6 | 4,41 | 1 |
+| 10 | 11 | 4,61 | 1 |
+
+**Evidências:** `resultados/arquivos_por_operacao.csv` (experimento=X4); `graficos/X4_open_por_profundidade.png`.
+
+**Análise:** os acessos crescem linearmente, de 2 a 11, exatamente profundidade + 1. O tempo, porém, cresce só 0,04 ms por nível (4,25 para 4,61 ms, cerca de 8% em 10 níveis), muito menos que proporcional: os diretórios foram alocados em blocos consecutivos, então a leitura de cada um é sequencial em relação ao anterior, sem busca nem rotação, e só paga a transferência de 0,04 ms. A primeira leitura (a raiz) paga o custo cheio. O `read` não depende da profundidade (1 acesso). O resultado depende do layout: diretórios espalhados pelo disco custariam uma busca por nível. Isso justifica a existência da dentry cache nos sistemas reais, que evita reler diretórios.
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
+### X5 — Tabelas de arquivos abertos com vários processos
+
+**Hipótese:** com vários processos abrindo os mesmos arquivos, a tabela global terá menos entradas que a soma das entradas das tabelas por processo (uma entrada global por arquivo, uma por processo por abertura), e o contador de aberturas de um arquivo popular ficará acima de 1 e nunca passará do número de processos.
+
+**Fundamentação:** Silberschatz 9ª ed., seção 11.1.3 (arquivos abertos): tabela global com uma entrada por arquivo aberto e contador, tabela por processo com posição e modo.
+
+**Configuração:** carga `fs_servidor_web`: 12 páginas e 8 trabalhadores; em cada uma das 40 rodadas, cada trabalhador sorteia 3 páginas, abre, lê e fecha. Mede o tamanho máximo da tabela global, o máximo por processo, a soma máxima das tabelas por processo e o contador máximo de aberturas.
+
+**Resultados:**
+
+| Indicador | Máximo |
+|---|---|
+| Tabela global (arquivos distintos abertos) | 12 |
+| Tabela por processo (maior) | 3 |
+| Soma das tabelas por processo | 24 |
+| Contador de aberturas de um arquivo | 6 |
+
+**Evidências:** `resultados/arquivos.csv` (experimento=X5); `graficos/X5_tabelas.png`.
+
+**Análise:** a soma das tabelas por processo (24) é o dobro da global (12), o que mostra o compartilhamento: um mesmo arquivo aparece uma vez na global e uma vez em cada processo que o abriu. Os 12 arquivos distintos são as 12 páginas, e os 24 da soma são 8 trabalhadores × 3 aberturas. O contador chegou a 6 aberturas simultâneas do mesmo arquivo, abaixo dos 8 trabalhadores, o que decorre do sorteio: cada trabalhador escolhe uma dada página com probabilidade 3/12, então a média esperada é 2 aberturas por página, e 6 é um pico. As posições (por processo) são independentes: um `read` em um processo não move a posição de outro, o que o teste automático do núcleo confere.
+
+**Veredito:** CONFIRMADA
+
+### X6 — Cache de blocos (M1)
+
+**Hipótese:** a LRU terá mais acertos que a FIFO com capacidades pequenas e a diferença sumirá com capacidades grandes; os acertos crescerão com a capacidade até um limite. O write-back reduzirá as escritas físicas e o tempo de resposta em relação ao write-through, mas perderá dados numa queda de energia, enquanto o write-through não perde nenhum.
+
+**Fundamentação:** Silberschatz 9ª ed., seções 13.4.3 (caching) e 12.6 (eficiência e desempenho): a cache evita acessos ao disco; o write-back adia a gravação, diminuindo a E/S, ao preço da integridade em falhas.
+
+**Configuração:** carga `es_reuso` (3.000 requisições de 1 bloco, Zipf sobre 4.000 blocos, 65% de leituras), FCFS, HDD, sem cache e com LRU e FIFO de 64 a 2.048 blocos, em write-through e write-back. A queda de energia ocorre no instante da requisição do meio (11.733 ms). A sincronização do write-back é a cada 5 s.
+
+**Resultados:**
+
+| Cache | Capacidade | Escrita | Acertos | Escritas físicas | Resp. média | Espera máx. | Perdidos na queda |
+|---|---|---|---|---|---|---|---|
+| nenhuma | — | — | — | 1.045 | 3.500,0 | 6.936,3 | 0 |
+| LRU | 64 | write-through | 39,6% | 1.045 | 74,7 | 257,8 | 0 |
+| FIFO | 64 | write-through | 31,3% | 1.045 | 436,1 | 885,5 | 0 |
+| LRU | 128 | write-through | 48,8% | 1.045 | 33,4 | 158,0 | 0 |
+| FIFO | 128 | write-through | 42,6% | 1.045 | 51,7 | 247,6 | 0 |
+| LRU | 256 | write-back | 57,7% | 543 | 47,4 | 1.271,1 | 55 |
+| LRU | 256 | write-through | 57,7% | 1.045 | 22,0 | 151,8 | 0 |
+| LRU | 1.024 | write-back | 67,0% | 541 | 39,1 | 1.416,8 | 55 |
+| LRU | 1.024 | write-through | 67,1% | 1.045 | 16,9 | 151,8 | 0 |
+| FIFO | 1.024 | write-back | 67,0% | 541 | 39,7 | 1.425,7 | 55 |
+| LRU | 2.048 | write-through | 67,1% | 1.045 | 16,9 | 151,8 | 0 |
+
+**Evidências:** `resultados/es.csv` (experimento=X6); `graficos/X6_acerto.png`, `graficos/X6_escrita.png`.
+
+**Análise:** com 64 e 128 blocos, a LRU acertou mais que a FIFO (39,6% contra 31,3% e 48,8% contra 42,6%), pois a carga é Zipf e os blocos populares têm de ficar na cache, o que a FIFO não garante porque expulsa o mais antigo, mesmo que muito usado. Com 1.024 blocos ou mais, as duas empatam em 67%, provavelmente o limite imposto pelas leituras de blocos ainda não vistos (faltas obrigatórias); a partir daí, mais capacidade não ajuda (1.024 e 2.048 deram resultados idênticos). O write-back reduziu as escritas físicas de 1.045 para cerca de 541 a 715 (queda de 22% a 48%), porque várias escritas ao mesmo bloco viram uma. O custo foi perder 22 a 55 blocos sujos na queda, contra zero no write-through. A parte inesperada: com capacidades de 256 ou mais, o write-back teve resposta média pior que o write-through (47,4 contra 22,0 ms) e espera máxima de mais de 1.200 ms. Nossa explicação, não verificada com outra medição, é que a sincronização a cada 5 s joga uma rajada de gravações no disco de uma vez, e as leituras que chegam durante ela esperam. Sem cache, a resposta média foi de 3.500 ms: o disco satura, pois a carga chega a cada 8 ms em média e o atendimento aleatório leva cerca de 10 ms.
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
+### X7 — Escalonadores avançados e inanição (M2)
+
+**Hipótese:** com a carga crescendo, o FCFS será o primeiro a degradar. O SSTF terá a melhor resposta média, mas a maior espera máxima. O C-SCAN terá a espera máxima mais uniforme (menor), ao custo da resposta média, por visitar as bordas. O LOOK será melhor que o SCAN (sem viagem à borda), e o DEADLINE ficará perto do SSTF na média, mas com espera máxima menor.
+
+**Fundamentação:** Silberschatz 9ª ed., seção 10.4: o C-SCAN dá tempo de espera mais uniforme que o SCAN; LOOK e C-LOOK evitam ir à borda sem necessidade; a documentação do mq-deadline do Linux descreve prazos por requisição para impedir inanição.
+
+**Configuração:** carga `concentrada` com semente 7 e 2.000 requisições, com intervalo médio entre chegadas de 14, 11, 9 e 8 ms (carga crescente), nos sete escalonadores (FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK, DEADLINE). Mede resposta média, p95 e espera máxima.
+
+**Resultados:** carga mais alta (intervalo de 8 ms):
+
+| Escalonador | Deslocamento | Resp. média | Resp. p95 | Espera máx. |
+|---|---|---|---|---|
+| FCFS | 1.811.896 | 281,6 | 538,0 | 616,2 |
+| SSTF | 1.150.844 | 27,8 | 79,6 | 327,1 |
+| SCAN | 1.529.626 | 49,0 | 116,6 | 226,7 |
+| C-SCAN | 1.589.526 | 65,8 | 142,1 | 223,1 |
+| LOOK | 1.165.152 | 31,4 | 87,5 | 170,3 |
+| C-LOOK | 1.258.318 | 38,9 | 100,2 | 163,8 |
+| DEADLINE | 1.148.860 | 28,4 | 84,8 | 244,8 |
+
+Resposta média por intervalo (14 / 11 / 9 / 8 ms): FCFS 15,8 / 26,5 / 61,2 / 281,6; SSTF 13,4 / 16,7 / 21,9 / 27,8; DEADLINE 13,4 / 16,7 / 22,0 / 28,4. Espera máxima do SSTF e do DEADLINE a 9 ms: 265,5 e 204,2; a 8 ms: 327,1 e 244,8.
+
+**Evidências:** `resultados/es.csv` (experimento=X7); `graficos/X7_resposta_p95_ms.png`, `graficos/X7_espera_max_ms.png`.
+
+**Análise:** o FCFS degrada de forma explosiva: a resposta média vai de 15,8 para 281,6 ms (18 vezes) quando o intervalo cai de 14 para 8 ms, enquanto o SSTF só dobra (13,4 para 27,8 ms). O SSTF é o melhor em média, mas tem a maior espera máxima entre os algoritmos que olham a posição (327 ms), contra 164 a 245 ms nos demais. Quem tem a menor espera máxima é o C-LOOK (163,8 ms) e o LOOK (170,3 ms), e o LOOK tem média só 13% pior que a do SSTF (31,4 contra 27,8 ms), o melhor compromisso entre média e justiça nesta carga. O C-SCAN, apesar do nome ligado à uniformidade, foi o pior em média entre os não-FCFS (65,8 ms) porque a carga é concentrada nos primeiros 20% do disco e ele faz viagens completas até a borda e de volta. O DEADLINE acompanhou o SSTF na média (28,4 contra 27,8 ms) e reduziu a espera máxima em 25% a 8 ms e 23% a 9 ms. Com 11 e 14 ms, os prazos nunca venceram e o DEADLINE foi idêntico ao SSTF. A espera máxima do DEADLINE (245 ms) ainda passa do prazo de leitura de 200 ms, pois uma vez que várias requisições vencem, elas esperam atrás umas das outras, de modo que o prazo limita a inanição, mas não garante o teto.
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
+### X11 — Métodos de alocação (M6)
+
+**Hipótese:** a alocação contígua terá o menor número de acessos por operação, mas sofrerá fragmentação externa: com o disco cheio, falhará em criar ou estender arquivos mesmo com blocos livres suficientes, e as realocações custarão cópias de blocos. A encadeada terá o pior custo de acesso direto (percorre a corrente). A FAT eliminará esse custo (ponteiros em memória). A indexada ficará no meio, com 1 a 2 leituras extras por acesso e uma pequena fração do espaço (cerca de 1%) para índices.
+
+**Fundamentação:** Silberschatz 9ª ed., seções 12.4 (métodos de alocação) e 12.5 (gerenciamento de espaço livre): a contígua sofre fragmentação externa; a encadeada é ruim para acesso direto; a FAT melhora a encadeada mantendo a tabela em memória; a indexada suporta acesso direto ao custo de blocos de índice.
+
+**Configuração:** carga `fs_alocacao` (criação e remoção de muitos arquivos até encher a partição, crescimento e acessos) numa partição de 20.000 blocos, com os quatro alocadores. Mede acessos e tempo por operação, falhas, realocações e fragmentação.
+
+**Resultados:**
+
+| Alocador | Erros (ENOSPC) | Acessos totais | Acessos por op. | Tempo por op. (ms) | Tempo total (s) | Realocações | Maior trecho livre | Blocos livres no fim |
+|---|---|---|---|---|---|---|---|---|
+| contígua | 113 | 18.151 | 7,35 | 34,55 | 85,3 | 59 | 154 | 2.052 |
+| encadeada | 0 | 191.309 | 77,52 | 12,73 | 31,4 | 0 | 1.939 | 1.939 |
+| FAT | 0 | 4.690 | 1,90 | 4,01 | 9,9 | 0 | 1.939 | 1.939 |
+| indexada | 0 | 10.585 | 4,29 | 14,32 | 35,3 | 0 | 1.805 | 1.805 |
+
+**Evidências:** `resultados/arquivos.csv` (experimento=X11); `graficos/X11_alocacao.png`, `graficos/X11_fragmentacao.png`.
+
+**Análise:** a contígua falhou em 113 operações (4,6% das 2.468) com 2.052 blocos livres (10% da partição), porque estavam em 50 trechos e o maior tinha só 154 blocos: é a fragmentação externa. As 59 realocações (cópia do arquivo inteiro) fizeram a contígua ter o maior tempo por operação (34,55 ms), apesar de usar poucos acessos por operação em média. A encadeada, por outro lado, teve 77,5 acessos por operação, pelo acesso direto percorrer a corrente, mas não falhou. A FAT, com os mesmos blocos e ponteiros em memória, teve o menor custo (1,9 acessos, 4,0 ms por operação): é 40 vezes menos acessos que a encadeada. A indexada teve 4,29 acessos por operação, mas um tempo por operação (14,32 ms) maior que o da encadeada (12,73 ms), contra a hipótese: provavelmente porque a corrente da encadeada lê blocos vizinhos em sequência, e o modelo de disco não cobra rotação quando o bloco lido é o seguinte ao anterior, enquanto cada leitura de índice da indexada cai num bloco isolado, que paga busca e rotação (explicação não verificada). O espaço dos índices aparece nos blocos livres no fim (1.805 contra 1.939, cerca de 0,7% da partição).
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
+### X12 — Integração ponta a ponta
+
+**Hipótese:** a cache terá efeito enorme na carga do compilador (muito reuso de cabeçalhos e fontes) e menor no banco de dados (acessos aleatórios com pouco reuso). A alocação indexada piorará a resposta sem cache (mais requisições, os blocos de índice), mas, com cache, os blocos de índice, muito reusados, serão acertos. O escalonador fará pouca diferença quando os acessos estão num trecho pequeno do disco (compilador) e mais diferença no acesso aleatório (banco de dados).
+
+**Fundamentação:** Silberschatz 9ª ed., seções 12.6 e 13.4.3: o desempenho do sistema de arquivos depende do layout dos blocos e da cache; o escalonamento só ajuda quando há deslocamento do braço a economizar.
+
+**Configuração:** cada carga de arquivos (`compilador`, `banco_dados`) roda no sistema de arquivos com alocação contígua e indexada, guardando o histórico de acessos ao disco; o histórico vira requisições de E/S, que passam por FCFS, SSTF e SCAN, sem cache e com cache LRU de 1.024 blocos em write-back.
+
+**Resultados:** resposta média (ms) e acertos de cache:
+
+| Carga + alocação | Requisições | FCFS sem cache | SSTF sem cache | FCFS com cache | Acertos |
+|---|---|---|---|---|---|
+| compilador + contígua | 5.400 | 4.970,9 | 5.170,1 | 0,2 | 90,4% |
+| compilador + indexada | 11.705 | 14.961,0 | 10.563,6 | 0,2 | 95,7% |
+| banco de dados + contígua | 3.610 | 6.158,8 | 4.106,2 | 2.150,6 | 4,9% |
+| banco de dados + indexada | 10.314 | 22.146,1 | 17.353,2 | 764,3 | 74,5% |
+
+Com cache, o SCAN percorreu 49.996 cilindros no compilador + contígua, contra 104 do FCFS e 80 do SSTF.
+
+**Evidências:** `resultados/es.csv` (experimento=X12); `graficos/X12_resposta.png`.
+
+**Análise:** o compilador, com muito reuso de arquivos já lidos, passa a 90,4% de acertos com 1.024 blocos, o que derruba a resposta de 4.970,9 para 0,2 ms. O banco de dados sobre alocação contígua só atinge 4,9% de acertos (cada acesso é a um bloco quase novo da tabela de 64 MiB), e a cache melhora a resposta (6.158,8 para 2.150,6 ms), mas muito menos. A alocação indexada duplicou ou triplicou o número de requisições (11.705 contra 5.400; 10.314 contra 3.610) e piorou a resposta sem cache (14.961 contra 4.971 ms no compilador; 22.146 contra 6.159 ms no banco), por causa das leituras do bloco de índice. Com cache, porém, os índices viram acertos: no banco de dados a indexada chegou a 74,5% de acertos e 764,3 ms de resposta, melhor que a contígua (2.150,6 ms), o resultado mais importante da integração, que só aparece quando as camadas são medidas juntas. O efeito do escalonador dependeu da carga: no banco de dados, sem cache, o SSTF reduziu a resposta em 33% na contígua (6.158,8 para 4.106,2 ms) e em 22% na indexada (22.146,1 para 17.353,2 ms), pois os acessos aleatórios à tabela pedem deslocamento do braço; no compilador o deslocamento é de poucos cilindros e a resposta é dominada pela rotação (4,17 ms por acesso fora de sequência), e o SSTF ficou até um pouco pior que o FCFS no compilador + contígua (5.170,1 contra 4.970,9 ms), provavelmente porque reordena requisições consecutivas do mesmo arquivo e quebra a sequência de blocos (explicação não verificada). Com cache, o SCAN foi pior em deslocamento (49.996 cilindros), pois cada falta que sobra o faz ir até a borda, mesmo que quase todas as requisições sejam absorvidas pela cache.
+
+**Veredito:** PARCIALMENTE CONFIRMADA
+
