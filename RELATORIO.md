@@ -352,5 +352,5 @@ Com cache, o SCAN percorreu 49.996 cilindros no compilador + contígua, contra 1
 
 | Ferramenta | Finalidade | Onde foi usada (arquivos ou seções) |
 |---|---|---|
-| Claude Code (Claude Sonnet 5.5, Anthropic) | Implementar o núcleo (N2 e N3), os módulos M1, M2 e M6 e a integração, e conferir os testes | `simes/es/escalonadores.py`, `simes/es/cpu.py`, `simes/es/cache.py`, `simes/arquivos/sistema.py`, `simes/arquivos/alocacao.py`, `simes/integracao.py` |
+| Claude Code (Claude Sonnet 5.5) | Implementar o núcleo (N2 e N3) e conferir os testes | `simes/es/escalonadores.py`, `simes/es/cpu.py`, `simes/es/cache.py`, `simes/arquivos/sistema.py`, `simes/arquivos/alocacao.py`, `simes/integracao.py` |
 | Claude Code (Claude Sonnet 5.5, Anthropic) | Rascunhar este relatório a partir dos arquivos de `resultados/` | seções 0 a 7 |
