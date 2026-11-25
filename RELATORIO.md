@@ -1,6 +1,6 @@
 # Relatório — SimES: simulador de E/S e de sistema de arquivos
 
-**Integrantes:** [nome completo do integrante 1], [nome completo do integrante 2], [nome completo do integrante 3], [nome completo do integrante 4]
+**Integrantes:** [Rafael Menchik Birmann], [Enzo Pecantet Xavier], [Diego Schaeffer dos Santos], [Artur Bäuerle Schultz]
 
 **Repositório:** [https://github.com/usuario/repositorio — link do repositório público do grupo]
 
@@ -320,9 +320,23 @@ Com cache, o SCAN percorreu 49.996 cilindros no compilador + contígua, contra 1
 
 ## 5. Limitações do simulador
 
+5. Limitações do simulador
+- O disco é único, de tempos fixos e sem fila no dispositivo: não há cache de trilha, reordenação interna da controladora (NCQ) nem variação da rotação por posição. O resultado do X1, em que a rotação domina, pode ser exagerado ou atenuado num disco real.
+- As cargas são sintéticas, com semente fixa: os efeitos de X6 e X12 dependem da distribuição escolhida (Zipf no X6). Uma única semente impede dar intervalos de confiança.
+- O simulador de E/S conta o custo da CPU, mas ele não retarda o disco, então polling e interrupção têm a mesma resposta (X2). Num sistema real, a CPU ocupada afetaria o resto.
+- O sistema de arquivos não tem cache de diretórios nem de metadados, então o open mede o pior caso (X4), e o close grava o diretório pai literalmente como no enunciado.
+- Na integração (X12), o histórico do sistema de arquivos vira requisições com os instantes originais da carga, sem retroalimentação: se o disco demora, as operações seguintes não atrasam, como atrasariam num sistema real, o que exagera a fila sem cache.
+- No X11, é uma única execução de uma carga com semente fixa: as diferenças pequenas (por exemplo, 12,73 contra 14,32 ms por operação) devem ser lidas como indícios.
+- Não foram implementados M3, M4, M5 nem o bônus de flash; as conclusões não cobrem DMA, links nem proteção.
 
 ## 6. Conclusões
 
+1. A política de escalonamento importa mais quanto mais o disco está saturado: na carga sequencial o FCFS levou a resposta a cerca de 600 vezes a do SSTF (10.241 contra 17,4 ms), e na carga crescente do X7 o FCFS ficou 18 vezes pior ao subir a carga, contra 2 vezes do SSTF.
+2. Não existe escalonador que vença em tudo: o SSTF tem a melhor média, mas a maior espera máxima entre os que olham a posição; o SCAN e o C-SCAN perdem em cargas concentradas por visitarem as bordas; o LOOK e o C-LOOK dão o melhor compromisso entre média e espera máxima; o DEADLINE mantém a média do SSTF e reduz a espera máxima, sem garantir um teto.
+3. A cache é a otimização mais eficaz do trabalho (resposta de 4.971 para 0,2 ms no compilador), e a política de escrita troca E/S por risco: o write-back reduziu as escritas físicas em até 48% à custa de perder até 55 blocos numa queda, e a sincronização periódica piorou a espera máxima.
+4. A alocação contígua pura é rápida enquanto há espaço contíguo, mas a fragmentação externa a fez falhar com 10% do disco livre; a FAT deu o melhor custo de acesso (1,9 por operação), desde que a tabela caiba em memória, e a encadeada pura só é viável para acesso sequencial (77,5 acessos por operação).
+5. Os resultados dependem da interação entre camadas: a alocação indexada é pior que a contígua sem cache e melhor com cache no banco de dados (764 contra 2.151 ms). Medir as camadas isoladas daria a conclusão oposta.
+6. O custo de resolver caminhos cresce linearmente em acessos (profundidade + 1), mas o tempo cresce pouco por nível, o que mostra por que os sistemas reais mantêm uma cache de diretórios.
 
 ## 7. Referências
 
@@ -333,9 +347,22 @@ Com cache, o SCAN percorreu 49.996 cilindros no compilador + contígua, contra 1
 
 ## 8. Declaração de autoria e uso de IA
 
-**Quem fez o quê:** [divisão do trabalho entre os integrantes: quem fez cada parte do código, cada experimento e cada seção deste relatório]
+**Quem fez o quê:**
+| Parte implementada pelo grupo | Onde | Responsável(is) |
+|---|---|---|
+| N2 — escalonadores SSTF e SCAN | `simes/es/escalonadores.py` | [Enzo Pecantet Xavier] |
+| N2 — custo de CPU por polling e interrupção | `simes/es/cpu.py` | [Diego Schaeffer dos Santos] |
+| N3 — resolução de caminhos, `mkdir`, `create`, `open`, `read`, `write`, `seek`, `close`, `unlink` e tabelas de arquivos abertos | `simes/arquivos/sistema.py` | [Diego Schaeffer dos Santos] |
+| M1 — cache LRU e FIFO, write-through e write-back | `simes/es/cache.py` | [Enzo Pecantet Xavier] |
+| M2 — C-SCAN, LOOK, C-LOOK e DEADLINE | `simes/es/escalonadores.py` | [Rafael Menchik Birmann] |
+| M6 — alocação encadeada, FAT e indexada | `simes/arquivos/alocacao.py` | [Artur Bäuerle Schultz] |
+| Integração ponta a ponta | `simes/integracao.py` | [Enzo Pecantet Xavier] |
+| Execução dos experimentos e dos gráficos, hipóteses e análises | `resultados/`, `graficos/`, `RELATORIO.md` seção 3 | [Rafael Menchik Birmann] |
+| Relatório | `RELATORIO.md` | [Artur Bäuerle Schultz, Enzo Pecantet Xavier, Diego Schaeffer dos Santos e Rafael Menchik Birmann] |
 
 **Uso de ferramentas de IA:**
 
 | Ferramenta | Finalidade | Onde foi usada (arquivos ou seções) |
 |---|---|---|
+| Claude Code (Claude Sonnet 5.5) | Rascunho inicial do núcleo (N2 e N3) a partir do que foi compreendido nos materiais de estudos disponibilizados pelo professor, explicar o código inicial do projeto, além de consultas pontuais e esclarecimento de dúvidas técnicas nos demais módulos, com revisão e ajustes manuais. | `simes/es/escalonadores.py`, `simes/es/cpu.py`, `simes/es/cache.py`, `simes/arquivos/sistema.py`, `simes/arquivos/alocacao.py`, `simes/integracao.py` |
+

@@ -1,9 +1,9 @@
 {
   "integrantes": [
-    {"nome": "Nome Completo do Integrante 1"},
-    {"nome": "Nome Completo do Integrante 2"},
-    {"nome": "Nome Completo do Integrante 3"},
-    {"nome": "Nome Completo do Integrante 4"}
+    {"nome": "Rafael Menchik Birmann"},
+    {"nome": "Enzo Pecantet Xavier"},
+    {"nome": "Diego Schaeffer dos Santos"},
+    {"nome": "Artur Bäuerle Schultz"}
   ],
   "repositorio": "https://github.com/usuario/nome-do-repositorio",
   "modulos": ["M1", "M2", "M6"],
