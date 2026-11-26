@@ -2,7 +2,7 @@
 
 **Integrantes:** [Rafael Menchik Birmann], [Enzo Pecantet Xavier], [Diego Schaeffer dos Santos], [Artur Bäuerle Schultz]
 
-**Repositório:** [https://github.com/usuario/repositorio — link do repositório público do grupo]
+**Repositório:** [https://github.com/Enzoxavierrr/Trabalho-2---Sisop.git]
 
 ## 0. Resumo
 
